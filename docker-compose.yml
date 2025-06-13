@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Tailscale container
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: openmemory-tailscale
+    hostname: openmemory-server
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=--advertise-tags=tag:mcp-server
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+
+  # Qdrant vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: openmemory-qdrant
+    network_mode: service:tailscale
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+
+  # OpenMemory FastMCP server
+  openmemory:
+    build:
+      context: ./openmemory-fastmcp
+      dockerfile: Dockerfile
+    container_name: openmemory-fastmcp
+    network_mode: service:tailscale
+    environment:
+      # Memory configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # Database configuration
+      - DATABASE_URL=sqlite:////app/data/openmemory.db
+      
+      # Qdrant configuration (using localhost since we share network)
+      - QDRANT_HOST=localhost
+      - QDRANT_PORT=6333
+      
+      # Server configuration
+      - HOST=0.0.0.0
+      - PORT=8765
+      
+      # Default user/app for testing
+      - DEFAULT_USER_ID=default_user
+      - DEFAULT_CLIENT_NAME=default_app
+    volumes:
+      - openmemory-data:/app/data
+    depends_on:
+      - qdrant
+    restart: unless-stopped
+
+volumes:
+  tailscale-state:
+  qdrant-storage:
+  openmemory-data:
+
+networks:
+  default:
+    name: openmemory-network
